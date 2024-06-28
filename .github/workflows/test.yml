@@ -19,13 +19,20 @@ jobs:
     steps:
 
     - name: Check out code
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
     
     - name: Install dotnet
       run: ./build/get-dotnet.sh
 
     - name: Build and run tests
       run: ./build_and_test.sh
+  
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: artifacts
+        path: artifacts
+        if-no-files-found: error
 
   grpc_web:
     name: gRPC-Web Tests
@@ -33,7 +40,7 @@ jobs:
     steps:
 
     - name: Check out code
-      uses: actions/checkout@v2
+      uses: actions/checkout@v4
 
     - name: Run interop tests
       run: ./grpcweb_interoptests.sh

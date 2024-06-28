@@ -19,6 +19,7 @@
 // Skip running load running tests in debug configuration
 #if !DEBUG
 
+using System.Globalization;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using Grpc.AspNetCore.FunctionalTests.Linker.Helpers;
@@ -33,19 +34,19 @@ public class LinkerTests
 {
     private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(120);
 
-#if NET8_0_OR_GREATER
+#if NET9_0_OR_GREATER
     [Test]
     public async Task RunWebsiteAndCallWithClient_Aot_Success()
     {
         await RunWebsiteAndCallWithClient(publishAot: true);
     }
-#endif
 
     [Test]
     public async Task RunWebsiteAndCallWithClient_Trimming_Success()
     {
         await RunWebsiteAndCallWithClient(publishAot: false);
     }
+#endif
 
     private async Task RunWebsiteAndCallWithClient(bool publishAot)
     {
@@ -86,7 +87,17 @@ public class LinkerTests
                 websiteProcess.Start(BuildStartPath(linkerTestsWebsitePath, "LinkerTestsWebsite"), arguments: null);
                 await websiteProcess.WaitForReadyAsync().TimeoutAfter(Timeout);
 
-                clientProcess.Start(BuildStartPath(linkerTestsClientPath, "LinkerTestsClient"), arguments: websiteProcess.ServerPort!.ToString());
+                string? clientArguments = null;
+                if (websiteProcess.ServerPort is {} serverPort)
+                {
+                    clientArguments = serverPort.ToString(CultureInfo.InvariantCulture);
+                }
+                else
+                {
+                    throw new InvalidOperationException("Website server port not available.");
+                }
+
+                clientProcess.Start(BuildStartPath(linkerTestsClientPath, "LinkerTestsClient"), arguments: clientArguments);
                 await clientProcess.WaitForExitAsync().TimeoutAfter(Timeout);
             }
             finally

@@ -21,33 +21,30 @@ using Grpc.Reflection.V1Alpha;
 namespace Grpc.Reflection;
 
 /// <summary>
-/// Implementation of server reflection service.
+/// Implementation of server reflection service (v1alpha).
 /// </summary>
 public class ReflectionServiceImpl : Grpc.Reflection.V1Alpha.ServerReflection.ServerReflectionBase
 {
-    readonly List<string> services;
-    readonly SymbolRegistry symbolRegistry;
+    readonly ReflectionServiceCore core;
 
     /// <summary>
-    /// Creates a new instance of <c>ReflectionServiceIml</c>.
+    /// Creates a new instance of <c>ReflectionServiceImpl</c>.
     /// </summary>
     public ReflectionServiceImpl(IEnumerable<string> services, SymbolRegistry symbolRegistry)
     {
-        this.services = new List<string>(services);
-        this.symbolRegistry = symbolRegistry;
+        core = new ReflectionServiceCore(services, symbolRegistry);
     }
 
     /// <summary>
-    /// Creates a new instance of <c>ReflectionServiceIml</c>.
+    /// Creates a new instance of <c>ReflectionServiceImpl</c>.
     /// </summary>
     public ReflectionServiceImpl(IEnumerable<ServiceDescriptor> serviceDescriptors)
     {
-        this.services = new List<string>(serviceDescriptors.Select((serviceDescriptor) => serviceDescriptor.FullName));
-        this.symbolRegistry = SymbolRegistry.FromFiles(serviceDescriptors.Select((serviceDescriptor) => serviceDescriptor.File));
+        core = new ReflectionServiceCore(serviceDescriptors);
     }
 
     /// <summary>
-    /// Creates a new instance of <c>ReflectionServiceIml</c>.
+    /// Creates a new instance of <c>ReflectionServiceImpl</c>.
     /// </summary>
     public ReflectionServiceImpl(params ServiceDescriptor[] serviceDescriptors) : this((IEnumerable<ServiceDescriptor>) serviceDescriptors)
     {
@@ -67,87 +64,50 @@ public class ReflectionServiceImpl : Grpc.Reflection.V1Alpha.ServerReflection.Se
 
     ServerReflectionResponse ProcessRequest(ServerReflectionRequest request)
     {
-        switch (request.MessageRequestCase)
+        var requestCase = request.MessageRequestCase switch
         {
-            case ServerReflectionRequest.MessageRequestOneofCase.FileByFilename:
-                return FileByFilename(request.FileByFilename);
-            case ServerReflectionRequest.MessageRequestOneofCase.FileContainingSymbol:
-                return FileContainingSymbol(request.FileContainingSymbol);
-            case ServerReflectionRequest.MessageRequestOneofCase.ListServices:
-                return ListServices();
-            case ServerReflectionRequest.MessageRequestOneofCase.AllExtensionNumbersOfType:
-            case ServerReflectionRequest.MessageRequestOneofCase.FileContainingExtension:
+            ServerReflectionRequest.MessageRequestOneofCase.FileByFilename => ReflectionServiceCore.RequestCase.FileByFilename,
+            ServerReflectionRequest.MessageRequestOneofCase.FileContainingSymbol => ReflectionServiceCore.RequestCase.FileContainingSymbol,
+            ServerReflectionRequest.MessageRequestOneofCase.ListServices => ReflectionServiceCore.RequestCase.ListServices,
+            _ => ReflectionServiceCore.RequestCase.Unsupported
+        };
+
+        var stringValue = request.MessageRequestCase switch
+        {
+            ServerReflectionRequest.MessageRequestOneofCase.FileByFilename => request.FileByFilename,
+            ServerReflectionRequest.MessageRequestOneofCase.FileContainingSymbol => request.FileContainingSymbol,
+            _ => null
+        };
+
+        var coreResponse = core.ProcessRequest(requestCase, stringValue);
+        return ToResponse(coreResponse);
+    }
+
+    static ServerReflectionResponse ToResponse(ReflectionServiceCore.Response coreResponse)
+    {
+        switch (coreResponse.Case)
+        {
+            case ReflectionServiceCore.ResponseCase.FileDescriptorResponse:
+                return new ServerReflectionResponse
+                {
+                    FileDescriptorResponse = new FileDescriptorResponse { FileDescriptorProto = { coreResponse.FileDescriptorProtos! } }
+                };
+            case ReflectionServiceCore.ResponseCase.ListServicesResponse:
+                var serviceResponses = new ListServiceResponse();
+                foreach (var serviceName in coreResponse.ServiceNames!)
+                {
+                    serviceResponses.Service.Add(new ServiceResponse { Name = serviceName });
+                }
+                return new ServerReflectionResponse
+                {
+                    ListServicesResponse = serviceResponses
+                };
+            case ReflectionServiceCore.ResponseCase.ErrorResponse:
             default:
-                return CreateErrorResponse(StatusCode.Unimplemented, "Request type not supported by C# reflection service.");
-        }
-    }
-
-    ServerReflectionResponse FileByFilename(string filename)
-    {
-        FileDescriptor? file = symbolRegistry.FileByName(filename);
-        if (file is null)
-        {
-            return CreateErrorResponse(StatusCode.NotFound, "File not found.");
-        }
-
-        var transitiveDependencies = new HashSet<FileDescriptor>();
-        CollectTransitiveDependencies(file, transitiveDependencies);
-
-        return new ServerReflectionResponse
-        {
-            FileDescriptorResponse = new FileDescriptorResponse { FileDescriptorProto = { transitiveDependencies.Select((d) => d.SerializedData) } }
-        };
-    }
-
-    ServerReflectionResponse FileContainingSymbol(string symbol)
-    {
-        FileDescriptor? file = symbolRegistry.FileContainingSymbol(symbol);
-        if (file is null)
-        {
-            return CreateErrorResponse(StatusCode.NotFound, "Symbol not found.");
-        }
-
-        var transitiveDependencies = new HashSet<FileDescriptor>();
-        CollectTransitiveDependencies(file, transitiveDependencies);
-
-        return new ServerReflectionResponse
-        {
-            FileDescriptorResponse = new FileDescriptorResponse { FileDescriptorProto = { transitiveDependencies.Select((d) => d.SerializedData) } }
-        };
-    }
-
-    ServerReflectionResponse ListServices()
-    {
-        var serviceResponses = new ListServiceResponse();
-        foreach (var serviceName in services)
-        {
-            serviceResponses.Service.Add(new ServiceResponse { Name = serviceName });
-        }
-
-        return new ServerReflectionResponse
-        {
-            ListServicesResponse = serviceResponses
-        };
-    }
-
-    ServerReflectionResponse CreateErrorResponse(StatusCode status, string message)
-    {
-        return new ServerReflectionResponse
-        {
-            ErrorResponse = new ErrorResponse { ErrorCode = (int) status, ErrorMessage = message }
-        };
-    }
-
-    void CollectTransitiveDependencies(FileDescriptor descriptor, HashSet<FileDescriptor> pool)
-    {
-        pool.Add(descriptor);
-        foreach (var dependency in descriptor.Dependencies)
-        {
-            if (pool.Add(dependency))
-            {
-                // descriptors cannot have circular dependencies
-                CollectTransitiveDependencies(dependency, pool);
-            }
+                return new ServerReflectionResponse
+                {
+                    ErrorResponse = new ErrorResponse { ErrorCode = coreResponse.ErrorCode, ErrorMessage = coreResponse.ErrorMessage }
+                };
         }
     }
 }

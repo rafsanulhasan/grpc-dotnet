@@ -1,4 +1,4 @@
-﻿#region Copyright notice and license
+#region Copyright notice and license
 
 // Copyright 2019 The gRPC Authors
 //
@@ -29,21 +29,23 @@ namespace Grpc.AspNetCore.Server.Model;
 /// A context for <see cref="IServiceMethodProvider{TService}"/>.
 /// </summary>
 /// <typeparam name="TService">Service type for the context.</typeparam>
-public class ServiceMethodProviderContext<
-#if NET5_0_OR_GREATER
-    [DynamicallyAccessedMembers(GrpcProtocolConstants.ServiceAccessibility)]
-#endif
-    TService> where TService : class
+public class ServiceMethodProviderContext<[DynamicallyAccessedMembers(GrpcProtocolConstants.ServiceAccessibility)] TService> where TService : class
 {
     private readonly ServerCallHandlerFactory<TService> _serverCallHandlerFactory;
 
-    internal ServiceMethodProviderContext(ServerCallHandlerFactory<TService> serverCallHandlerFactory)
+    internal ServiceMethodProviderContext(ServerCallHandlerFactory<TService> serverCallHandlerFactory, object? argument)
     {
         Methods = new List<MethodModel>();
         _serverCallHandlerFactory = serverCallHandlerFactory;
+        Argument = argument;
     }
 
     internal List<MethodModel> Methods { get; }
+
+    /// <summary>
+    /// Gets the argument passed to the <see cref="IServiceMethodProvider{TService}"/> constructor.
+    /// </summary>
+    public object? Argument { get; }
 
     /// <summary>
     /// Adds a unary method to a service.

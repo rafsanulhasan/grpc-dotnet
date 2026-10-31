@@ -1,4 +1,4 @@
-﻿#region Copyright notice and license
+#region Copyright notice and license
 
 // Copyright 2019 The gRPC Authors
 //
@@ -21,7 +21,7 @@ namespace Grpc.AspNetCore.Server.Model.Internal;
 /// <summary>
 /// A registry of all the service methods in the application.
 /// </summary>
-internal class ServiceMethodsRegistry
+internal sealed class ServiceMethodsRegistry
 {
     public List<MethodModel> Methods { get; } = new List<MethodModel>();
 }

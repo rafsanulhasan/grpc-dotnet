@@ -16,7 +16,6 @@
 
 #endregion
 
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using Grpc.Core;
 #if SUPPORT_LOAD_BALANCING
@@ -39,7 +38,7 @@ namespace Grpc.Net.Client;
 /// a remote call so in general you should reuse a single channel for as many calls as possible.
 /// </summary>
 [DebuggerDisplay("{DebuggerToString(),nq}")]
-public sealed class GrpcChannel : ChannelBase, IDisposable
+public sealed partial class GrpcChannel : ChannelBase, IDisposable
 {
     internal const int DefaultMaxReceiveMessageSize = 1024 * 1024 * 4; // 4 MB
 #if SUPPORT_LOAD_BALANCING
@@ -51,7 +50,7 @@ public sealed class GrpcChannel : ChannelBase, IDisposable
     internal const long DefaultMaxRetryBufferPerCallSize = 1024 * 1024; // 1 MB
 
     private readonly object _lock;
-    private readonly ConcurrentDictionary<IMethod, GrpcMethodInfo> _methodInfoCache;
+    private readonly ThreadSafeLookup<IMethod, GrpcMethodInfo> _methodInfoCache;
     private readonly Func<IMethod, GrpcMethodInfo> _createMethodInfoFunc;
     private readonly Dictionary<MethodKey, MethodConfig>? _serviceConfigMethods;
     private readonly bool _isSecure;
@@ -79,6 +78,10 @@ public sealed class GrpcChannel : ChannelBase, IDisposable
     internal Dictionary<string, ICompressionProvider> CompressionProviders { get; }
     internal string MessageAcceptEncoding { get; }
     internal bool Disposed { get; private set; }
+    internal Version HttpVersion { get; }
+#if NET5_0_OR_GREATER
+    internal HttpVersionPolicy HttpVersionPolicy { get; }
+#endif
 
 #if SUPPORT_LOAD_BALANCING
     // Load balancing
@@ -105,7 +108,7 @@ public sealed class GrpcChannel : ChannelBase, IDisposable
     internal GrpcChannel(Uri address, GrpcChannelOptions channelOptions) : base(address.Authority)
     {
         _lock = new object();
-        _methodInfoCache = new ConcurrentDictionary<IMethod, GrpcMethodInfo>();
+        _methodInfoCache = new ThreadSafeLookup<IMethod, GrpcMethodInfo>(MethodInfoComparer.Instance);
 
         // Dispose the HTTP client/handler if...
         //   1. No client/handler was specified and so the channel created the client itself
@@ -175,6 +178,10 @@ public sealed class GrpcChannel : ChannelBase, IDisposable
             RetryThrottling = serviceConfig.RetryThrottling != null ? CreateChannelRetryThrottling(serviceConfig.RetryThrottling) : null;
             _serviceConfigMethods = CreateServiceConfigMethods(serviceConfig);
         }
+        HttpVersion = channelOptions.HttpVersion ?? GrpcProtocolConstants.Http2Version;
+#if NET5_0_OR_GREATER
+        HttpVersionPolicy = channelOptions.HttpVersionPolicy ?? HttpVersionPolicy.RequestVersionExact;
+#endif
 
         // Non-HTTP addresses (e.g. dns:///custom-hostname) usually specify a path instead of an authority.
         // Only log about a path being present if HTTP or HTTPS.
@@ -489,7 +496,10 @@ public sealed class GrpcChannel : ChannelBase, IDisposable
         // Decision to dispose invoker is controlled by _shouldDisposeHttpClient.
         if (handler == null)
         {
-            handler = HttpHandlerFactory.CreatePrimaryHandler();
+            if (!HttpHandlerFactory.TryCreatePrimaryHandler(out handler))
+            {
+                throw HttpHandlerFactory.CreateUnsupportedHandlerException();
+            }
         }
         else
         {
@@ -559,8 +569,14 @@ public sealed class GrpcChannel : ChannelBase, IDisposable
         }
     }
 
-    internal GrpcMethodInfo GetCachedGrpcMethodInfo(IMethod method)
+    internal GrpcMethodInfo GetCachedGrpcMethodInfo<TRequest, TResponse>(Method<TRequest, TResponse> method)
     {
+        // Only the known implementation guarantees immutable method metadata.
+        if (method.GetType() != typeof(Method<TRequest, TResponse>))
+        {
+            return CreateMethodInfo(method);
+        }
+
         return _methodInfoCache.GetOrAdd(method, _createMethodInfoFunc);
     }
 
@@ -902,6 +918,25 @@ public sealed class GrpcChannel : ChannelBase, IDisposable
         return debugText;
     }
 
+    private sealed class MethodInfoComparer : IEqualityComparer<IMethod>
+    {
+        public static readonly MethodInfoComparer Instance = new MethodInfoComparer();
+
+        public bool Equals(IMethod? x, IMethod? y)
+        {
+            return ReferenceEquals(x, y) ||
+                (x != null && y != null &&
+                x.Type == y.Type &&
+                string.Equals(x.FullName, y.FullName, StringComparison.Ordinal) &&
+                // Service config resolution uses these names independently of FullName.
+                string.Equals(x.ServiceName, y.ServiceName, StringComparison.Ordinal) &&
+                string.Equals(x.Name, y.Name, StringComparison.Ordinal));
+        }
+
+        public int GetHashCode(IMethod obj) =>
+            StringComparer.Ordinal.GetHashCode(obj.FullName) ^ obj.Type.GetHashCode();
+    }
+
     private readonly struct MethodKey : IEquatable<MethodKey>
     {
         public MethodKey(string? service, string? method)
@@ -923,15 +958,10 @@ public sealed class GrpcChannel : ChannelBase, IDisposable
             (Method != null ? StringComparer.Ordinal.GetHashCode(Method) : 0);
     }
 
-    private static class Log
+    private static partial class Log
     {
-        private static readonly Action<ILogger, string, Exception?> _addressPathUnused =
-            LoggerMessage.Define<string>(LogLevel.Debug, new EventId(1, "AddressPathUnused"), "The path in the channel's address '{Address}' won't be used when making gRPC calls. A DelegatingHandler can be used to include a path with gRPC calls. See https://aka.ms/aspnet/grpc/subdir for details.");
-
-        public static void AddressPathUnused(ILogger logger, string address)
-        {
-            _addressPathUnused(logger, address, null);
-        }
+        [LoggerMessage(Level = LogLevel.Debug, EventId = 1, EventName = "AddressPathUnused", Message = "The path in the channel's address '{Address}' won't be used when making gRPC calls. A DelegatingHandler can be used to include a path with gRPC calls. See https://aka.ms/aspnet/grpc/subdir for details.")]
+        public static partial void AddressPathUnused(ILogger logger, string address);
     }
 
     private readonly record struct HttpHandlerContext(HttpHandlerType HttpHandlerType, TimeSpan? ConnectTimeout = null, TimeSpan? ConnectionIdleTimeout = null);

@@ -72,7 +72,7 @@ internal sealed partial class HttpContextServerCallContext : ServerCallContext, 
 
     protected override string MethodCore => HttpContext.Request.Path.Value!;
 
-    protected override string HostCore => HttpContext.Request.Host.Value;
+    protected override string HostCore => HttpContext.Request.Host.Value!;
 
     protected override string PeerCore
     {
@@ -193,7 +193,16 @@ internal sealed partial class HttpContextServerCallContext : ServerCallContext, 
         }
         else
         {
-            GrpcServerLog.ErrorExecutingServiceMethod(Logger, method, ex);
+            if (ex is OperationCanceledException or IOException && CancellationTokenCore.IsCancellationRequested)
+            {
+                // Request cancellation can cause OCE and IOException.
+                // When the request has been canceled log these error types at the info-level to avoid creating error-level noise.
+                GrpcServerLog.ServiceMethodCanceled(Logger, method, ex);
+            }
+            else
+            {
+                GrpcServerLog.ErrorExecutingServiceMethod(Logger, method, ex);
+            }
 
             var message = ErrorMessageHelper.BuildErrorMessage("Exception was thrown by handler.", ex, Options.EnableDetailedErrors);
 
@@ -411,14 +420,12 @@ internal sealed partial class HttpContextServerCallContext : ServerCallContext, 
 
     private Activity? GetHostActivity()
     {
-#if NET6_0_OR_GREATER
         // Feature always returns the host activity
         var feature = HttpContext.Features.Get<IHttpActivityFeature>();
         if (feature != null)
         {
             return feature.Activity;
         }
-#endif
 
         // If feature isn't available, or not supported, then fallback to Activity.Current.
         var activity = Activity.Current;

@@ -31,7 +31,7 @@ namespace Microsoft.Extensions.DependencyInjection;
 /// <summary>
 /// Extension methods for the gRPC reflection services.
 /// </summary>
-public static class GrpcReflectionServiceExtensions
+public static partial class GrpcReflectionServiceExtensions
 {
     /// <summary>
     /// Adds gRPC reflection services to the specified <see cref="IServiceCollection" />.
@@ -44,41 +44,69 @@ public static class GrpcReflectionServiceExtensions
 
         services.TryAddSingleton<GrpcReflectionMarkerService>();
 
-        // ReflectionServiceImpl is designed to be a singleton
-        // Explicitly register creating it in DI using descriptors calculated from gRPC endpoints in the app
-        services.TryAddSingleton<ReflectionServiceImpl>(serviceProvider =>
+        // Resolve service descriptors once and share between v1alpha and v1 implementations.
+        services.TryAddSingleton(serviceProvider =>
         {
             var logger = serviceProvider.GetRequiredService<ILoggerFactory>().CreateLogger(nameof(GrpcReflectionServiceExtensions));
             var endpointDataSource = serviceProvider.GetRequiredService<EndpointDataSource>();
 
-            var grpcEndpointMetadata = endpointDataSource.Endpoints
-                .Select(ep => ep.Metadata.GetMetadata<GrpcMethodMetadata>())
-                .OfType<GrpcMethodMetadata>()
-                .ToList();
+            return ResolveServiceDescriptors(endpointDataSource, logger);
+        });
 
-            var serviceTypes = grpcEndpointMetadata.Select(m => m.ServiceType).Distinct().ToList();
+        // ReflectionServiceImpl is designed to be a singleton
+        // Explicitly register creating it in DI using descriptors calculated from gRPC endpoints in the app
+        services.TryAddSingleton(serviceProvider =>
+        {
+            var descriptors = serviceProvider.GetRequiredService<ResolvedServiceDescriptors>();
+            return new ReflectionServiceImpl(descriptors.ServiceDescriptors);
+        });
 
-            var serviceDescriptors = new List<Google.Protobuf.Reflection.ServiceDescriptor>();
-
-            foreach (var serviceType in serviceTypes)
-            {
-                var descriptorPropertyInfo = GetDescriptorProperty(serviceType);
-                if (descriptorPropertyInfo != null)
-                {
-                    if (descriptorPropertyInfo.GetValue(null) is Google.Protobuf.Reflection.ServiceDescriptor serviceDescriptor)
-                    {
-                        serviceDescriptors.Add(serviceDescriptor);
-                        continue;
-                    }
-                }
-
-                Log.ServiceDescriptorNotResolved(logger, serviceType);
-            }
-
-            return new ReflectionServiceImpl(serviceDescriptors);
+        services.TryAddSingleton(serviceProvider =>
+        {
+            var descriptors = serviceProvider.GetRequiredService<ResolvedServiceDescriptors>();
+            return new ReflectionV1ServiceImpl(descriptors.ServiceDescriptors);
         });
 
         return services;
+    }
+
+    private static ResolvedServiceDescriptors ResolveServiceDescriptors(EndpointDataSource endpointDataSource, ILogger logger)
+    {
+        var grpcEndpointMetadata = endpointDataSource.Endpoints
+            .Select(ep => ep.Metadata.GetMetadata<GrpcMethodMetadata>())
+            .OfType<GrpcMethodMetadata>()
+            .ToList();
+
+        var serviceTypes = grpcEndpointMetadata.Select(m => m.ServiceType).Distinct().ToList();
+
+        var serviceDescriptors = new List<Google.Protobuf.Reflection.ServiceDescriptor>();
+
+        foreach (var serviceType in serviceTypes)
+        {
+            var descriptorPropertyInfo = GetDescriptorProperty(serviceType);
+            if (descriptorPropertyInfo != null)
+            {
+                if (descriptorPropertyInfo.GetValue(null) is Google.Protobuf.Reflection.ServiceDescriptor serviceDescriptor)
+                {
+                    serviceDescriptors.Add(serviceDescriptor);
+                    continue;
+                }
+            }
+
+            Log.ServiceDescriptorNotResolved(logger, serviceType);
+        }
+
+        return new ResolvedServiceDescriptors(serviceDescriptors);
+    }
+
+    internal sealed class ResolvedServiceDescriptors
+    {
+        public IReadOnlyList<Google.Protobuf.Reflection.ServiceDescriptor> ServiceDescriptors { get; }
+
+        public ResolvedServiceDescriptors(IReadOnlyList<Google.Protobuf.Reflection.ServiceDescriptor> serviceDescriptors)
+        {
+            ServiceDescriptors = serviceDescriptors;
+        }
     }
 
     private static PropertyInfo? GetDescriptorProperty(Type serviceType)
@@ -150,14 +178,13 @@ public static class GrpcReflectionServiceExtensions
         return baseType;
     }
 
-    private static class Log
+    private static partial class Log
     {
-        private static readonly Action<ILogger, string, Exception?> _serviceDescriptorNotResolved =
-            LoggerMessage.Define<string>(LogLevel.Debug, new EventId(1, "ServiceDescriptorNotResolved"), "Could not resolve service descriptor for '{ServiceType}'. The service metadata will not be exposed by the reflection service.");
-
+        [LoggerMessage(Level = LogLevel.Debug, EventId = 1, EventName = "ServiceDescriptorNotResolved", Message = "Could not resolve service descriptor for '{ServiceType}'. The service metadata will not be exposed by the reflection service.")]
+        private static partial void ServiceDescriptorNotResolved(ILogger logger, string serviceType);
         public static void ServiceDescriptorNotResolved(ILogger logger, Type serviceType)
         {
-            _serviceDescriptorNotResolved(logger, serviceType.FullName ?? string.Empty, null);
+            ServiceDescriptorNotResolved(logger, serviceType.FullName ?? string.Empty);
         }
     }
 }

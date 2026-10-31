@@ -218,8 +218,17 @@ public class StreamingTests : FunctionalTestBase
 
         await call.ResponseHeadersAsync.DefaultTimeout();
 
+        // Drain the response stream so the call is fully complete before checking status.
+        var ex = Assert.ThrowsAsync<RpcException>(async () =>
+        {
+            while (await call.ResponseStream.MoveNext(CancellationToken.None).DefaultTimeout())
+            {
+            }
+        });
+
         // Assert
         Assert.AreEqual(StatusCode.Unimplemented, call.GetStatus().StatusCode);
+        Assert.AreEqual(StatusCode.Unimplemented, ex!.StatusCode);
     }
 
     [Test]
@@ -429,7 +438,7 @@ public class StreamingTests : FunctionalTestBase
         AssertHasLog(LogLevel.Information, "GrpcStatusError", "Call failed with gRPC error status. Status code: 'Cancelled', Message: ''.");
 
         await TestHelpers.AssertIsTrueRetryAsync(
-            () => HasLog(LogLevel.Error, "ErrorExecutingServiceMethod", "Error when executing service method 'ClientStreamedDataTimeout'."),
+            () => HasLog(LogLevel.Information, "ServiceMethodCanceled", "Service method 'ClientStreamedDataTimeout' canceled."),
             "Wait for server error so it doesn't impact other tests.").DefaultTimeout();
     }
 
@@ -953,7 +962,6 @@ public class StreamingTests : FunctionalTestBase
         Assert.AreEqual(StatusCode.NotFound, ex.StatusCode);
     }
 
-#if NET5_0_OR_GREATER
     [Test]
     public Task MaxConcurrentStreams_StartConcurrently_AdditionalConnectionsCreated()
     {
@@ -1322,5 +1330,4 @@ public class StreamingTests : FunctionalTestBase
         Logger.LogInformation("Client waiting for server canceled confirmation.");
         Assert.IsTrue(await serverCanceledTcs.Task.DefaultTimeout());
     }
-#endif
 }

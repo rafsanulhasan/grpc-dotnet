@@ -26,7 +26,7 @@ namespace Grpc.AspNetCore.Server.Internal;
 
 [DebuggerDisplay("{DebuggerToString(),nq}")]
 [DebuggerTypeProxy(typeof(HttpContextStreamWriter<>.HttpContextStreamWriterDebugView))]
-internal class HttpContextStreamWriter<TResponse> : IServerStreamWriter<TResponse>
+internal sealed class HttpContextStreamWriter<TResponse> : IServerStreamWriter<TResponse>
     where TResponse : class
 {
     private readonly HttpContextServerCallContext _context;
@@ -62,13 +62,11 @@ internal class HttpContextStreamWriter<TResponse> : IServerStreamWriter<TRespons
         return WriteCoreAsync(message, CancellationToken.None);
     }
 
-#if NET5_0_OR_GREATER
     // Explicit implementation because this WriteAsync has a default interface implementation.
     Task IAsyncStreamWriter<TResponse>.WriteAsync(TResponse message, CancellationToken cancellationToken)
     {
         return WriteCoreAsync(message, cancellationToken);
     }
-#endif
 
     private async Task WriteCoreAsync(TResponse message, CancellationToken cancellationToken)
     {

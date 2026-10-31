@@ -120,18 +120,17 @@ public class InteropClient
             httpMessageHandler = CreateWinHttpHandler();
         }
 
+        Version? versionOverride = null;
         if (!string.IsNullOrEmpty(options.GrpcWebMode) && !string.Equals(options.GrpcWebMode, "None", StringComparison.OrdinalIgnoreCase))
         {
             var mode = (GrpcWebMode)Enum.Parse(typeof(GrpcWebMode), options.GrpcWebMode);
-            httpMessageHandler = new GrpcWebHandler(mode, httpMessageHandler)
-            {
-                HttpVersion = new Version(1, 1)
-            };
+            httpMessageHandler = new GrpcWebHandler(mode, httpMessageHandler);
+            versionOverride = new Version(1, 1);
         }
         if (options.UseHttp3)
         {
 #if NET6_0_OR_GREATER
-            httpMessageHandler = new Http3DelegatingHandler(httpMessageHandler);
+            versionOverride = new Version(3, 0);
 #else
             throw new Exception("HTTP/3 requires .NET 6 or later.");
 #endif
@@ -141,30 +140,12 @@ public class InteropClient
         {
             Credentials = credentials,
             HttpHandler = httpMessageHandler,
-            LoggerFactory = loggerFactory
+            LoggerFactory = loggerFactory,
+            HttpVersion = versionOverride
         });
 
         return new GrpcChannelWrapper(channel);
     }
-
-#if NET6_0_OR_GREATER
-    private class Http3DelegatingHandler : DelegatingHandler
-    {
-        private static readonly Version Http3Version = new Version(3, 0);
-
-        public Http3DelegatingHandler(HttpMessageHandler innerHandler)
-        {
-            InnerHandler = innerHandler;
-        }
-
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            request.Version = Http3Version;
-            request.VersionPolicy = HttpVersionPolicy.RequestVersionExact;
-            return base.SendAsync(request, cancellationToken);
-        }
-    }
-#endif
 
     private static WinHttpHandler CreateWinHttpHandler()
     {
@@ -186,7 +167,11 @@ public class InteropClient
         {
             var pem = File.ReadAllText("Certs/ca.pem");
             var certData = GetBytesFromPem(pem, "CERTIFICATE");
+#if NET9_0_OR_GREATER
+            var cert = X509CertificateLoader.LoadCertificate(certData!);
+#else
             var cert = new X509Certificate2(certData!);
+#endif
 
             httpClientHandler.ClientCertificates.Add(cert);
         }
@@ -234,14 +219,14 @@ public class InteropClient
         if (options.TestCase == "jwt_token_creds")
         {
             var googleCredential = await GoogleCredential.GetApplicationDefaultAsync();
-            Assert.IsTrue(googleCredential.IsCreateScopedRequired);
+            Assert.IsFalse(googleCredential.UnderlyingCredential is ComputeCredential);
             credentials = ChannelCredentials.Create(credentials, googleCredential.ToCallCredentials());
         }
 
         if (options.TestCase == "compute_engine_creds")
         {
             var googleCredential = await GoogleCredential.GetApplicationDefaultAsync();
-            Assert.IsFalse(googleCredential.IsCreateScopedRequired);
+            Assert.IsTrue(googleCredential.UnderlyingCredential is ComputeCredential);
             credentials = ChannelCredentials.Create(credentials, googleCredential.ToCallCredentials());
         }
 #else

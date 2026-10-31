@@ -37,6 +37,7 @@ internal abstract partial class RetryCallBase<TRequest, TResponse> : IGrpcCall<T
     private Task<TResponse>? _responseTask;
     private Task<Metadata>? _responseHeadersTask;
     private TRequest? _request;
+    private bool _commitStarted;
 
     // Internal for unit testing.
     internal CancellationTokenRegistration? _ctsRegistration;
@@ -284,7 +285,7 @@ internal abstract partial class RetryCallBase<TRequest, TResponse> : IGrpcCall<T
         // https://github.com/grpc/proposal/blob/master/A6-client-retries.md#pushback
         if (httpResponse != null)
         {
-            var headerValue = GrpcProtocolHelpers.GetHeaderValue(httpResponse.Headers, GrpcProtocolConstants.RetryPushbackHeader);
+            var headerValue = HttpRequestHelpers.GetHeaderValue(httpResponse.Headers, GrpcProtocolConstants.RetryPushbackHeader);
             if (headerValue != null)
             {
                 Log.RetryPushbackReceived(Logger, headerValue);
@@ -300,20 +301,21 @@ internal abstract partial class RetryCallBase<TRequest, TResponse> : IGrpcCall<T
 
     protected byte[] SerializePayload(GrpcCall<TRequest, TResponse> call, CallOptions callOptions, TRequest request)
     {
-        var serializationContext = call.SerializationContext;
-        serializationContext.CallOptions = callOptions;
-        serializationContext.Initialize();
+        var lease = call.RentSerializationContext(callOptions);
 
         try
         {
-            call.Method.RequestMarshaller.ContextualSerializer(request, serializationContext);
+            call.Method.RequestMarshaller.ContextualSerializer(request, lease.Context);
 
             // Need to take a copy because the serialization context will returned a rented buffer.
-            return serializationContext.GetWrittenPayload().ToArray();
+            var payload = lease.Context.GetWrittenPayload().ToArray();
+
+            lease.MarkReusable();
+            return payload;
         }
         finally
         {
-            serializationContext.Reset();
+            lease.Dispose();
         }
     }
 
@@ -369,8 +371,11 @@ internal abstract partial class RetryCallBase<TRequest, TResponse> : IGrpcCall<T
     {
         lock (Lock)
         {
-            if (!CommitedCallTask.IsCompletedSuccessfully())
+            if (!_commitStarted)
             {
+                // Specify that call is commiting. This is to prevent any chance of re-entrancy from logic run in OnCommitCall.
+                _commitStarted = true;
+
                 // The buffer size is verified in unit tests after calls are completed.
                 // Clear the buffer before commiting call.
                 ClearRetryBuffer();

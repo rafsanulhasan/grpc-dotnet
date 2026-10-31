@@ -27,7 +27,7 @@ namespace Grpc.Net.Client.Internal.Http;
 /// The payload is then written directly to the request using specialized context
 /// and serializer method.
 /// </summary>
-internal class WinHttpUnaryContent<TRequest, TResponse> : HttpContent
+internal sealed class WinHttpUnaryContent<TRequest, TResponse> : HttpContent
     where TRequest : class
     where TResponse : class
 {
@@ -77,19 +77,19 @@ internal class WinHttpUnaryContent<TRequest, TResponse> : HttpContent
 
     private int GetPayloadLength()
     {
-        var serializationContext = _call.SerializationContext;
-        serializationContext.CallOptions = _call.Options;
-        serializationContext.Initialize();
+        var lease = _call.RentSerializationContext(_call.Options);
 
         try
         {
-            _call.Method.RequestMarshaller.ContextualSerializer(_request, serializationContext);
+            _call.Method.RequestMarshaller.ContextualSerializer(_request, lease.Context);
 
-            return serializationContext.GetWrittenPayload().Length;
+            var length = lease.Context.GetWrittenPayload().Length;
+            lease.MarkReusable();
+            return length;
         }
         finally
         {
-            serializationContext.Reset();
+            lease.Dispose();
         }
     }
 }

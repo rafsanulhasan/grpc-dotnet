@@ -1,4 +1,4 @@
-﻿#region Copyright notice and license
+#region Copyright notice and license
 
 // Copyright 2019 The gRPC Authors
 //
@@ -19,9 +19,9 @@
 using System.IO.Pipes;
 using System.Security.Principal;
 
-#if NET5_0_OR_GREATER
-
 namespace GrpcClient;
+
+#if NET9_0_OR_GREATER
 
 public class NamedPipeConnectionFactory
 {

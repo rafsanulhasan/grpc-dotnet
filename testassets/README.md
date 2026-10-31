@@ -22,13 +22,13 @@ ASP.NET Core app that hosts `InteropTestsGrpcWebClient`.
 Start the website by running it in Docker. Execute in the root of repository:
 
 ```
-docker-compose -f docker-compose.yml build grpcweb-client
-docker-compose -f docker-compose.yml up grpcweb-client
+docker compose -f docker-compose.yml build grpcweb-client
+docker compose -f docker-compose.yml up grpcweb-client
 ```
 
 gRPC-Web interop client is hosted at `http://localhost:8081`.
 
-The *testassets/InteropTestsGrpcWebWebsite/Tests* directory contains scripts for automatically executing the interop tests. Steps to run the tests:
+The *testassets/InteropTestsGrpcWebWebsite/Tests* directory contains scripts for automatically executing the interop tests. These scripts require Node.js 22.12 or later and npm. Run `npm install` in that directory before running the tests. Steps to run the tests:
 
 1. Start `InteropTestsWebsite` container
 2. Start `InteropTestsGrpcWebWebsite` container
@@ -45,8 +45,8 @@ ASP.NET Core app that hosts gRPC interop service. It is called by `InteropTestsC
 Start the website by running it in Docker. Execute in the root of repository:
 
 ```
-docker-compose -f docker-compose.yml build grpcweb-server
-docker-compose -f docker-compose.yml up grpcweb-server
+docker compose -f docker-compose.yml build grpcweb-server
+docker compose -f docker-compose.yml up grpcweb-server
 ```
 
 gRPC interop services are hosted at `http://localhost:8080`.

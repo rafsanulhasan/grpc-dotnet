@@ -1,4 +1,4 @@
-﻿#region Copyright notice and license
+#region Copyright notice and license
 
 // Copyright 2019 The gRPC Authors
 //
@@ -18,35 +18,30 @@
 
 using System.IO.Compression;
 using Grpc.Net.Compression;
+using Grpc.Shared.Server;
 using Microsoft.Extensions.Options;
 
 namespace Grpc.AspNetCore.Server.Internal;
 
-internal class GrpcServiceOptionsSetup : IConfigureOptions<GrpcServiceOptions>
+internal sealed class GrpcServiceOptionsSetup : IConfigureOptions<GrpcServiceOptions>
 {
-    // Default to no send limit and 4mb receive limit.
-    // Matches the gRPC C impl defaults
-    // https://github.com/grpc/grpc/blob/977df7208a6e3f9a62a6369af5cd6e4b69b4fdec/include/grpc/impl/codegen/grpc_types.h#L413-L416
-    internal const int DefaultReceiveMaxMessageSize = 4 * 1024 * 1024;
-
     public void Configure(GrpcServiceOptions options)
     {
-        if (!options._maxReceiveMessageSizeConfigured)
+        if (!options.MaxReceiveMessageSizeSpecified)
         {
             // Only default MaxReceiveMessageSize if it was not configured
-            options._maxReceiveMessageSize = DefaultReceiveMaxMessageSize;
+            options._maxReceiveMessageSize = MethodOptions.DefaultReceiveMaxMessageSize;
         }
         if (options._compressionProviders == null || options._compressionProviders.Count == 0)
         {
             options.CompressionProviders.Add(new GzipCompressionProvider(CompressionLevel.Fastest));
-#if NET6_0_OR_GREATER
+
             options.CompressionProviders.Add(new DeflateCompressionProvider(CompressionLevel.Fastest));
-#endif
         }
     }
 }
 
-internal class GrpcServiceOptionsSetup<TService> : IConfigureOptions<GrpcServiceOptions<TService>> where TService : class
+internal sealed class GrpcServiceOptionsSetup<TService> : IConfigureOptions<GrpcServiceOptions<TService>> where TService : class
 {
     private readonly GrpcServiceOptions _options;
 
@@ -57,8 +52,12 @@ internal class GrpcServiceOptionsSetup<TService> : IConfigureOptions<GrpcService
 
     public void Configure(GrpcServiceOptions<TService> options)
     {
-        options.MaxReceiveMessageSize = _options.MaxReceiveMessageSize;
-        options.MaxSendMessageSize = _options.MaxSendMessageSize;
+        // Copy internal fields to avoid running logic in property setters.
+        options._maxReceiveMessageSize = _options._maxReceiveMessageSize;
+        options._maxReceiveMessageSizeSpecified = _options._maxReceiveMessageSizeSpecified;
+        options._maxSendMessageSize = _options._maxSendMessageSize;
+        options._maxSendMessageSizeSpecified = _options._maxSendMessageSizeSpecified;
+
         options.EnableDetailedErrors = _options.EnableDetailedErrors;
         options.ResponseCompressionAlgorithm = _options.ResponseCompressionAlgorithm;
         options.ResponseCompressionLevel = _options.ResponseCompressionLevel;

@@ -1,4 +1,4 @@
-﻿#region Copyright notice and license
+#region Copyright notice and license
 
 // Copyright 2019 The gRPC Authors
 //
@@ -24,11 +24,7 @@ using Log = Grpc.AspNetCore.Server.Model.Internal.BinderServiceMethodProviderLog
 
 namespace Grpc.AspNetCore.Server.Model.Internal;
 
-internal class BinderServiceMethodProvider<
-#if NET5_0_OR_GREATER
-    [DynamicallyAccessedMembers(GrpcProtocolConstants.ServiceAccessibility)]
-#endif
-    TService> : IServiceMethodProvider<TService> where TService : class
+internal sealed class BinderServiceMethodProvider<[DynamicallyAccessedMembers(GrpcProtocolConstants.ServiceAccessibility)] TService> : IServiceMethodProvider<TService> where TService : class
 {
     private readonly ILogger<BinderServiceMethodProvider<TService>> _logger;
 
@@ -65,13 +61,8 @@ internal class BinderServiceMethodProvider<
     }
 }
 
-internal static class BinderServiceMethodProviderLog
+internal static partial class BinderServiceMethodProviderLog
 {
-    private static readonly Action<ILogger, Type, Exception?> _bindMethodNotFound =
-        LoggerMessage.Define<Type>(LogLevel.Debug, new EventId(1, "BindMethodNotFound"), "Could not find bind method for {ServiceType}.");
-
-    public static void BindMethodNotFound(ILogger logger, Type serviceType)
-    {
-        _bindMethodNotFound(logger, serviceType, null);
-    }
+    [LoggerMessage(Level = LogLevel.Debug, EventId = 1, EventName = "BindMethodNotFound", Message = "Could not find bind method for {ServiceType}.")]
+    public static partial void BindMethodNotFound(ILogger logger, Type serviceType);
 }

@@ -1,4 +1,4 @@
-﻿#region Copyright notice and license
+#region Copyright notice and license
 
 // Copyright 2019 The gRPC Authors
 //
@@ -27,10 +27,10 @@ namespace Grpc.AspNetCore.Server;
 public class GrpcServiceOptions
 {
     internal IList<ICompressionProvider>? _compressionProviders;
-    internal bool _maxReceiveMessageSizeConfigured;
     internal int? _maxReceiveMessageSize;
-    internal bool _maxSendMessageSizeConfigured;
     internal int? _maxSendMessageSize;
+    internal bool _maxSendMessageSizeSpecified;
+    internal bool _maxReceiveMessageSizeSpecified;
 
     /// <summary>
     /// Gets or sets the maximum message size in bytes that can be sent from the server.
@@ -45,13 +45,31 @@ public class GrpcServiceOptions
         set
         {
             _maxSendMessageSize = value;
-            _maxSendMessageSizeConfigured = true;
+            MaxSendMessageSizeSpecified = true;
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets a flag indicating whether <see cref="MaxSendMessageSize"/> is specified.
+    /// This flag is automatically set to true when <see cref="MaxSendMessageSize"/> is configured.
+    /// </summary>
+    public bool MaxSendMessageSizeSpecified
+    {
+        get => _maxSendMessageSizeSpecified;
+        set
+        {
+            _maxSendMessageSizeSpecified = value;
+            if (!_maxSendMessageSizeSpecified)
+            {
+                _maxSendMessageSize = null;
+            }
         }
     }
 
     /// <summary>
     /// Gets or sets the maximum message size in bytes that can be received by the server.
     /// If the server receives a message that exceeds this limit, it throws an exception.
+    /// For compressed messages, the limit applies to both the compressed and decompressed message sizes.
     /// <para>
     /// A <c>null</c> value removes the maximum message size limit. Defaults to 4,194,304 (4 MB).
     /// </para>
@@ -62,7 +80,24 @@ public class GrpcServiceOptions
         set
         {
             _maxReceiveMessageSize = value;
-            _maxReceiveMessageSizeConfigured = true;
+            MaxReceiveMessageSizeSpecified = true;
+        }
+    }
+
+    /// <summary>
+    /// Gets or sets a flag indicating whether <see cref="MaxReceiveMessageSize"/> is specified.
+    /// This flag is automatically set to true when <see cref="MaxReceiveMessageSize"/> is configured.
+    /// </summary>
+    public bool MaxReceiveMessageSizeSpecified
+    {
+        get => _maxReceiveMessageSizeSpecified;
+        set
+        {
+            _maxReceiveMessageSizeSpecified = value;
+            if (!_maxReceiveMessageSizeSpecified)
+            {
+                _maxReceiveMessageSize = null;
+            }
         }
     }
 
@@ -112,6 +147,11 @@ public class GrpcServiceOptions
     /// Get a collection of interceptors to be executed with every call. Interceptors are executed in order.
     /// </summary>
     public InterceptorCollection Interceptors { get; } = new InterceptorCollection();
+
+    /// <summary>
+    /// Gets or sets a value indicating whether creating a service is suppressed when handling a gRPC call.
+    /// </summary>
+    public bool SuppressCreatingService { get; set; }
 }
 
 /// <summary>

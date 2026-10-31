@@ -1,4 +1,4 @@
-﻿#region Copyright notice and license
+#region Copyright notice and license
 
 // Copyright 2019 The gRPC Authors
 //
@@ -21,6 +21,7 @@ using System.CommandLine.Invocation;
 using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
+using System.Net.Http;
 using System.Net.Security;
 using System.Net.Sockets;
 using System.Reflection;
@@ -61,63 +62,80 @@ class Program
 
     public static async Task<int> Main(string[] args)
     {
-        var urlOption = new Option<Uri>(new string[] { "-u", "--url" }, "The server url to request") { IsRequired = true };
-        var udsFileNameOption = new Option<string>(new string[] { "--udsFileName" }, "The Unix Domain Socket file name");
-        var namedPipeNameOption = new Option<string>(new string[] { "--namedPipeName" }, "The Named Pipe name");
-        var connectionsOption = new Option<int>(new string[] { "-c", "--connections" }, () => 1, "Total number of connections to keep open");
-        var warmupOption = new Option<int>(new string[] { "-w", "--warmup" }, () => 5, "Duration of the warmup in seconds");
-        var durationOption = new Option<int>(new string[] { "-d", "--duration" }, () => 10, "Duration of the test in seconds");
-        var callCountOption = new Option<int?>(new string[] { "--callCount" }, "Call count of test");
-        var scenarioOption = new Option<string>(new string[] { "-s", "--scenario" }, "Scenario to run") { IsRequired = true };
-        var latencyOption = new Option<bool>(new string[] { "-l", "--latency" }, () => false, "Whether to collect detailed latency");
-        var protocolOption = new Option<string>(new string[] { "-p", "--protocol" }, "HTTP protocol") { IsRequired = true };
-        var logOption = new Option<LogLevel>(new string[] { "-log", "--logLevel" }, () => LogLevel.None, "The log level to use for Console logging");
-        var requestSizeOption = new Option<int>(new string[] { "--requestSize" }, "Request payload size");
-        var responseSizeOption = new Option<int>(new string[] { "--responseSize" }, "Response payload size");
-        var grpcClientTypeOption = new Option<GrpcClientType>(new string[] { "--grpcClientType" }, () => GrpcClientType.GrpcNetClient, "Whether to use Grpc.NetClient or Grpc.Core client");
-        var streamsOption = new Option<int>(new string[] { "--streams" }, () => 1, "Maximum concurrent streams per connection");
-        var enableCertAuthOption = new Option<bool>(new string[] { "--enableCertAuth" }, () => false, "Flag indicating whether client sends a client certificate");
-        var deadlineOption = new Option<int>(new string[] { "--deadline" }, "Duration of deadline in seconds");
+        var urlOption = new Option<Uri>("--url", ["-u"])
+        {
+            Description = "The server url to request",
+            Required = true,
+            CustomParser = result =>
+            {
+                var token = result.Tokens.SingleOrDefault();
+                if (token is null || !Uri.TryCreate(token.Value, UriKind.Absolute, out var uri))
+                {
+                    result.AddError("The --url option requires a valid absolute URI.");
+                    return null;
+                }
+                return uri;
+            }
+        };
+        var udsFileNameOption = new Option<string>("--udsFileName") { Description = "The Unix Domain Socket file name" };
+        var namedPipeNameOption = new Option<string>("--namedPipeName") { Description = "The Named Pipe name" };
+        var connectionsOption = new Option<int>("--connections", ["-c"]) { DefaultValueFactory = (r) => 1, Description = "Total number of connections to keep open" };
+        var warmupOption = new Option<int>("--warmup", ["-w"]) { DefaultValueFactory = (r) => 5, Description = "Duration of the warmup in seconds" };
+        var durationOption = new Option<int>("--duration", ["-d"]) { DefaultValueFactory = (r) => 10, Description = "Duration of the test in seconds" };
+        var callCountOption = new Option<int?>("--callCount") { Description = "Call count of test" };
+        var scenarioOption = new Option<string>("--scenario", ["-s"]) { Description = "Scenario to run", Required = true };
+        var latencyOption = new Option<bool>("--latency", ["-l"]) { DefaultValueFactory = (r) => false, Description = "Whether to collect detailed latency" };
+        var protocolOption = new Option<string>("--protocol", ["-p"]) { Description = "HTTP protocol", Required = true };
+        var logOption = new Option<LogLevel>("--logLevel", ["-log"]) { DefaultValueFactory = (_) => LogLevel.None, Description = "The log level to use for Console logging" };
+        var requestSizeOption = new Option<int>("--requestSize") { Description = "Request payload size" };
+        var responseSizeOption = new Option<int>("--responseSize") { Description = "Response payload size" };
+        var grpcClientTypeOption = new Option<GrpcClientType>("--grpcClientType") { DefaultValueFactory = (r) => GrpcClientType.GrpcNetClient, Description = "Whether to use Grpc.NetClient or Grpc.Core client" };
+        var streamsOption = new Option<int>("--streams") { DefaultValueFactory = (r) => 1, Description = "Maximum concurrent streams per connection" };
+        var enableCertAuthOption = new Option<bool>("--enableCertAuth") { DefaultValueFactory = (r) => false, Description = "Flag indicating whether client sends a client certificate" };
+        var deadlineOption = new Option<int>("--deadline") { Description = "Duration of deadline in seconds" };
+        var winHttpHandlerOption = new Option<bool>("--winhttphandler") { DefaultValueFactory = (r) => false, Description = "Whether to use WinHttpHandler with Grpc.Net.Client" };
 
         var rootCommand = new RootCommand();
-        rootCommand.AddOption(urlOption);
-        rootCommand.AddOption(udsFileNameOption);
-        rootCommand.AddOption(namedPipeNameOption);
-        rootCommand.AddOption(connectionsOption);
-        rootCommand.AddOption(warmupOption);
-        rootCommand.AddOption(durationOption);
-        rootCommand.AddOption(callCountOption);
-        rootCommand.AddOption(scenarioOption);
-        rootCommand.AddOption(latencyOption);
-        rootCommand.AddOption(protocolOption);
-        rootCommand.AddOption(logOption);
-        rootCommand.AddOption(requestSizeOption);
-        rootCommand.AddOption(responseSizeOption);
-        rootCommand.AddOption(grpcClientTypeOption);
-        rootCommand.AddOption(streamsOption);
-        rootCommand.AddOption(enableCertAuthOption);
-        rootCommand.AddOption(deadlineOption);
+        rootCommand.Add(urlOption);
+        rootCommand.Add(udsFileNameOption);
+        rootCommand.Add(namedPipeNameOption);
+        rootCommand.Add(connectionsOption);
+        rootCommand.Add(warmupOption);
+        rootCommand.Add(durationOption);
+        rootCommand.Add(callCountOption);
+        rootCommand.Add(scenarioOption);
+        rootCommand.Add(latencyOption);
+        rootCommand.Add(protocolOption);
+        rootCommand.Add(logOption);
+        rootCommand.Add(requestSizeOption);
+        rootCommand.Add(responseSizeOption);
+        rootCommand.Add(grpcClientTypeOption);
+        rootCommand.Add(streamsOption);
+        rootCommand.Add(enableCertAuthOption);
+        rootCommand.Add(deadlineOption);
+        rootCommand.Add(winHttpHandlerOption);
 
-        rootCommand.SetHandler(async (InvocationContext context) =>
+        rootCommand.SetAction(async (ParseResult context) =>
         {
             _options = new ClientOptions();
-            _options.Url = context.ParseResult.GetValueForOption(urlOption);
-            _options.UdsFileName = context.ParseResult.GetValueForOption(udsFileNameOption);
-            _options.NamedPipeName = context.ParseResult.GetValueForOption(namedPipeNameOption);
-            _options.Connections = context.ParseResult.GetValueForOption(connectionsOption);
-            _options.Warmup = context.ParseResult.GetValueForOption(warmupOption);
-            _options.Duration = context.ParseResult.GetValueForOption(durationOption);
-            _options.CallCount = context.ParseResult.GetValueForOption(callCountOption);
-            _options.Scenario = context.ParseResult.GetValueForOption(scenarioOption);
-            _options.Latency = context.ParseResult.GetValueForOption(latencyOption);
-            _options.Protocol = context.ParseResult.GetValueForOption(protocolOption);
-            _options.LogLevel = context.ParseResult.GetValueForOption(logOption);
-            _options.RequestSize = context.ParseResult.GetValueForOption(requestSizeOption);
-            _options.ResponseSize = context.ParseResult.GetValueForOption(responseSizeOption);
-            _options.GrpcClientType = context.ParseResult.GetValueForOption(grpcClientTypeOption);
-            _options.Streams = context.ParseResult.GetValueForOption(streamsOption);
-            _options.EnableCertAuth = context.ParseResult.GetValueForOption(enableCertAuthOption);
-            _options.Deadline = context.ParseResult.GetValueForOption(deadlineOption);
+            _options.Url = context.GetValue(urlOption);
+            _options.UdsFileName = context.GetValue(udsFileNameOption);
+            _options.NamedPipeName = context.GetValue(namedPipeNameOption);
+            _options.Connections = context.GetValue(connectionsOption);
+            _options.Warmup = context.GetValue(warmupOption);
+            _options.Duration = context.GetValue(durationOption);
+            _options.CallCount = context.GetValue(callCountOption);
+            _options.Scenario = context.GetValue(scenarioOption);
+            _options.Latency = context.GetValue(latencyOption);
+            _options.Protocol = context.GetValue(protocolOption);
+            _options.LogLevel = context.GetValue(logOption);
+            _options.RequestSize = context.GetValue(requestSizeOption);
+            _options.ResponseSize = context.GetValue(responseSizeOption);
+            _options.GrpcClientType = context.GetValue(grpcClientTypeOption);
+            _options.Streams = context.GetValue(streamsOption);
+            _options.EnableCertAuth = context.GetValue(enableCertAuthOption);
+            _options.Deadline = context.GetValue(deadlineOption);
+            _options.WinHttpHandler = context.GetValue(winHttpHandlerOption);
 
             var runtimeVersion = typeof(object).GetTypeInfo().Assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ?? "Unknown";
             var isServerGC = GCSettings.IsServerGC;
@@ -156,11 +174,14 @@ class Program
 
         Log("gRPC Client");
 
-        return await rootCommand.InvokeAsync(args);
+        var result = rootCommand.Parse(args);
+        return await result.InvokeAsync();
     }
 
+#if NET9_0_OR_GREATER
     [UnconditionalSuppressMessage("AotAnalysis", "IL3050:RequiresDynamicCode",
         Justification = "DependencyInjection only used with safe types.")]
+#endif
     private static ILoggerFactory CreateLoggerFactory()
     {
         return LoggerFactory.Create(c =>
@@ -244,7 +265,7 @@ class Program
             var text = "Exception from test: " + ex.Message;
             Log(text);
             _errorStringBuilder.AppendLine();
-            _errorStringBuilder.Append(CultureInfo.InvariantCulture, $"[{DateTime.Now:hh:mm:ss.fff}] {text}");
+            _errorStringBuilder.Append(string.Format(CultureInfo.InvariantCulture, "[{0:hh:mm:ss.fff}] {1}", DateTime.Now, text) );
         }
     }
 
@@ -425,7 +446,9 @@ class Program
         var initialUri = _options.Url!;
         var resolvedUri = initialUri.Authority;
 
+        Log($"Framework version: {System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription}");
         Log($"gRPC client type: {_options.GrpcClientType}");
+        Log($"WinHttpHandler: {(_options.GrpcClientType == GrpcClientType.GrpcNetClient ? _options.WinHttpHandler.ToString() : "N/A")}");
         Log($"Log level: {_options.LogLevel}");
         Log($"Protocol: '{_options.Protocol}'");
         Log($"Creating channels to '{resolvedUri}'");
@@ -465,60 +488,74 @@ class Program
                 var address = useTls ? "https://" : "http://";
                 address += target;
 
-#if NETCOREAPP3_1
-                AppContext.SetSwitch("System.Net.Http.SocketsHttpHandler.Http2UnencryptedSupport", true);
-#endif
+                // Force H3 on all requests.
+                var versionOverride = _options.Protocol == "h3"
+                    ? new Version(3, 0)
+                    : null;
 
-                var httpClientHandler = new SocketsHttpHandler();
-                httpClientHandler.UseProxy = false;
-                httpClientHandler.AllowAutoRedirect = false;
-                if (_options.EnableCertAuth)
-                {
-                    var basePath = Path.GetDirectoryName(AppContext.BaseDirectory);
-                    var certPath = Path.Combine(basePath!, "Certs", "client.pfx");
-                    var clientCertificate = new X509Certificate2(certPath, "1111");
-                    httpClientHandler.SslOptions.ClientCertificates = new X509CertificateCollection
-                    {
-                        clientCertificate
-                    };
-                }
-#if NET5_0_OR_GREATER
-                if (!string.IsNullOrEmpty(_options.UdsFileName))
-                {
-                    var connectionFactory = new UnixDomainSocketConnectionFactory(new UnixDomainSocketEndPoint(ResolveUdsPath(_options.UdsFileName)));
-                    httpClientHandler.ConnectCallback = connectionFactory.ConnectAsync;
-                }
-                else if (!string.IsNullOrEmpty(_options.NamedPipeName))
-                {
-                    var connectionFactory = new NamedPipeConnectionFactory(_options.NamedPipeName);
-                    httpClientHandler.ConnectCallback = connectionFactory.ConnectAsync;
-                }
-#endif
-
-                httpClientHandler.SslOptions.RemoteCertificateValidationCallback =
-                    (object sender, X509Certificate? certificate, X509Chain? chain, SslPolicyErrors sslPolicyErrors) => true;
-
-                HttpMessageHandler httpMessageHandler = httpClientHandler;
-
-                if (_options.Protocol == "h3")
-                {
-                    // Stop gRPC channel from creating TCP socket.
-                    httpClientHandler.ConnectCallback = (context, cancellationToken) => throw new InvalidOperationException("Should never be called for H3.");
-
-                    // Force H3 on all requests.
-                    httpMessageHandler = new Http3DelegatingHandler(httpMessageHandler);
-                }
-
+                var httpMessageHandler = CreateMessageHandler();
                 return GrpcChannel.ForAddress(address, new GrpcChannelOptions
                 {
-#if NET5_0_OR_GREATER
                     HttpHandler = httpMessageHandler,
-#else
-                    HttpClient = new HttpClient(httpMessageHandler),
-#endif
-                    LoggerFactory = _loggerFactory
+                    LoggerFactory = _loggerFactory,
+                    HttpVersion = versionOverride
                 });
         }
+    }
+
+    private static HttpMessageHandler CreateMessageHandler()
+    {
+        if (_options.WinHttpHandler)
+        {
+            return CreateWinHttpHandler();
+        }
+
+#if NET9_0_OR_GREATER
+        var httpClientHandler = new SocketsHttpHandler();
+        httpClientHandler.UseProxy = false;
+        httpClientHandler.AllowAutoRedirect = false;
+        if (_options.EnableCertAuth)
+        {
+            var basePath = Path.GetDirectoryName(AppContext.BaseDirectory);
+            var certPath = Path.Combine(basePath!, "Certs", "client.pfx");
+            var clientCertificates = X509CertificateLoader.LoadPkcs12CollectionFromFile(certPath, "1111");
+            httpClientHandler.SslOptions.ClientCertificates = clientCertificates;
+        }
+
+        if (!string.IsNullOrEmpty(_options.UdsFileName))
+        {
+            var connectionFactory = new UnixDomainSocketConnectionFactory(new UnixDomainSocketEndPoint(ResolveUdsPath(_options.UdsFileName)));
+            httpClientHandler.ConnectCallback = connectionFactory.ConnectAsync;
+        }
+        else if (!string.IsNullOrEmpty(_options.NamedPipeName))
+        {
+            var connectionFactory = new NamedPipeConnectionFactory(_options.NamedPipeName);
+            httpClientHandler.ConnectCallback = connectionFactory.ConnectAsync;
+        }
+
+        httpClientHandler.SslOptions.RemoteCertificateValidationCallback =
+            (object sender, X509Certificate? certificate, X509Chain? chain, SslPolicyErrors sslPolicyErrors) => true;
+
+        if (_options.Protocol == "h3")
+        {
+            // Stop gRPC channel from creating TCP socket.
+            httpClientHandler.ConnectCallback = (context, cancellationToken) => throw new InvalidOperationException("Should never be called for H3.");
+        }
+
+        return httpClientHandler;
+#else
+        return CreateWinHttpHandler();
+#endif
+    }
+
+    private static WinHttpHandler CreateWinHttpHandler()
+    {
+#pragma warning disable CA1416 // Validate platform compatibility
+        return new WinHttpHandler
+        {
+            ServerCertificateValidationCallback = (sender, certificate, chain, sslPolicyErrors) => true,
+        };
+#pragma warning restore CA1416 // Validate platform compatibility
     }
 
     private static string ResolveUdsPath(string udsFileName) => Path.Combine(Path.GetTempPath(), udsFileName);
@@ -761,22 +798,5 @@ class Program
     private static bool IsCallCountExceeded()
     {
         return _options.CallCount != null && _callsStarted > _options.CallCount;
-    }
-
-    private class Http3DelegatingHandler : DelegatingHandler
-    {
-        private static readonly Version Http3Version = new Version(3, 0);
-
-        public Http3DelegatingHandler(HttpMessageHandler innerHandler)
-        {
-            InnerHandler = innerHandler;
-        }
-
-        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        {
-            request.Version = Http3Version;
-            request.VersionPolicy = HttpVersionPolicy.RequestVersionExact;
-            return base.SendAsync(request, cancellationToken);
-        }
     }
 }

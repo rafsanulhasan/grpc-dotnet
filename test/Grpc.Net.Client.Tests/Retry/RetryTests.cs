@@ -165,7 +165,10 @@ public class RetryTests
         var credentialsSyncPoint = new SyncPoint(runContinuationsAsynchronously: true);
         var credentials = CallCredentials.FromInterceptor(async (context, metadata) =>
         {
-            await credentialsSyncPoint.WaitToContinue();
+            var tcs = new TaskCompletionSource<bool>();
+            context.CancellationToken.Register(s => ((TaskCompletionSource<bool>)s!).SetResult(true), tcs);
+
+            await Task.WhenAny(credentialsSyncPoint.WaitToContinue(), tcs.Task);
             metadata.Add("Authorization", $"Bearer TEST");
         });
         var invoker = HttpClientCallInvokerFactory.Create(httpClient, loggerFactory: provider.GetRequiredService<ILoggerFactory>(), serviceConfig: serviceConfig, configure: options => options.Credentials = ChannelCredentials.Create(new SslCredentials(), credentials));
@@ -1147,10 +1150,24 @@ public class RetryTests
             await MakeGrpcCallAsync(logger, invoker, action);
 
             logger.LogDebug("Waiting for finalizers");
-            for (var i = 0; i < 5; i++)
+            if (expectedUnobservedExceptions > 0)
             {
-                TriggerUnobservedExceptions();
-                await Task.Delay(10);
+                // Wait for this case's exception while its handler is registered. Otherwise, a late
+                // finalizer could raise the exception after the next parameterized case has started.
+                await TestHelpers.AssertIsTrueRetryAsync(() =>
+                {
+                    TriggerUnobservedExceptions();
+                    return unobservedExceptions.Count >= expectedUnobservedExceptions;
+                }, "Wait for unobserved exceptions.", logger);
+            }
+            else
+            {
+                // No event can prove that an exception won't be raised, so use a fixed observation window.
+                for (var i = 0; i < 5; i++)
+                {
+                    TriggerUnobservedExceptions();
+                    await Task.Delay(10);
+                }
             }
 
             foreach (var exception in unobservedExceptions)

@@ -1,19 +1,15 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework Condition="'$(NetFxFramework)'!='true'">net9.0</TargetFramework>
+    <TargetFramework Condition="'$(NetFxFramework)'=='true'">net462</TargetFramework>
     <OutputType>Exe</OutputType>
     <DefineConstants Condition="'$(EnableGrpcWeb)' == 'true'">$(DefineConstants);GRPC_WEB</DefineConstants>
     <!-- Enable server GC to more closely simulate a microservice app making calls -->
     <ServerGarbageCollection>true</ServerGarbageCollection>
-    <!-- TODO(JamesNK): Workaround https://github.com/grpc/grpc/issues/29672 -->
-    <NoWarn>$(NoWarn);CS8981</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- Required for QUIC & HTTP/3 in .NET 6 - https://github.com/dotnet/runtime/pull/55332 -->
-    <RuntimeHostConfigurationOption Include="System.Net.SocketsHttpHandler.Http3Support" Value="true" />
-
     <Protobuf Include="..\Shared\benchmark_service.proto" GrpcServices="Client" Link="Protos\benchmark_service.proto" />
     <Protobuf Include="..\Shared\messages.proto" GrpcServices="Client" Link="Protos\messages.proto" />
     
@@ -28,6 +24,7 @@
     <PackageReference Include="Microsoft.Extensions.Logging.Console" />
     <PackageReference Include="Newtonsoft.Json" />
     <PackageReference Include="System.CommandLine" />
+    <PackageReference Include="System.Net.Http.WinHttpHandler" />
 
     <PackageReference Include="Google.Protobuf" />
     <PackageReference Include="Grpc.Core" />
@@ -52,11 +49,6 @@
   </ItemGroup>
   <ItemGroup Condition="'$(PublishAot)'=='true'">
     <PackageReference Include="Grpc.Net.Client" />
-  </ItemGroup>
-
-
-  <ItemGroup Condition="$([MSBuild]::VersionGreaterThanOrEquals($(TargetFrameworkVersion), 5.0))">
-
   </ItemGroup>
 
 </Project>

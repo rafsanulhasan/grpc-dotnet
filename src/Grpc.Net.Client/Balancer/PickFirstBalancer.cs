@@ -17,8 +17,6 @@
 #endregion
 
 #if SUPPORT_LOAD_BALANCING
-using System;
-using System.Collections.Generic;
 using Grpc.Core;
 using Grpc.Net.Client.Balancer.Internal;
 using Grpc.Net.Client.Configuration;
@@ -187,7 +185,7 @@ internal class PickFirstPicker : SubchannelPicker
     }
 }
 
-internal class RequestConnectionPicker : PickFirstPicker
+internal sealed class RequestConnectionPicker : PickFirstPicker
 {
     public RequestConnectionPicker(Subchannel subchannel) : base(subchannel)
     {
@@ -200,23 +198,18 @@ internal class RequestConnectionPicker : PickFirstPicker
     }
 }
 
-internal static class PickFirstBalancerLog
+internal static partial class PickFirstBalancerLog
 {
-    private static readonly Action<ILogger, string, ConnectivityState, string, Exception?> _processingSubchannelStateChanged =
-        LoggerMessage.Define<string, ConnectivityState, string>(LogLevel.Trace, new EventId(1, "ProcessingSubchannelStateChanged"), "Processing subchannel id '{SubchannelId}' state changed to {State}. Detail: '{Detail}'.");
-
-    private static readonly Action<ILogger, string, Exception?> _ignoredSubchannelStateChange =
-        LoggerMessage.Define<string>(LogLevel.Trace, new EventId(2, "IgnoredSubchannelStateChange"), "Ignored state change because of unknown subchannel id '{SubchannelId}'.");
+    [LoggerMessage(Level = LogLevel.Trace, EventId = 1, EventName = "ProcessingSubchannelStateChanged", Message = "Processing subchannel id '{SubchannelId}' state changed to {State}. Detail: '{Detail}'.")]
+    private static partial void ProcessingSubchannelStateChanged(ILogger logger, string subchannelId, ConnectivityState state, string Detail, Exception? DebugException);
 
     public static void ProcessingSubchannelStateChanged(ILogger logger, string subchannelId, ConnectivityState state, Status status)
     {
-        _processingSubchannelStateChanged(logger, subchannelId, state, status.Detail, status.DebugException);
+        ProcessingSubchannelStateChanged(logger, subchannelId, state, status.Detail, status.DebugException);
     }
 
-    public static void IgnoredSubchannelStateChange(ILogger logger, string subchannelId)
-    {
-        _ignoredSubchannelStateChange(logger, subchannelId, null);
-    }
+    [LoggerMessage(Level = LogLevel.Trace, EventId = 2, EventName = "IgnoredSubchannelStateChange", Message = "Ignored state change because of unknown subchannel id '{SubchannelId}'.")]
+    public static partial void IgnoredSubchannelStateChange(ILogger logger, string subchannelId);
 }
 
 /// <summary>

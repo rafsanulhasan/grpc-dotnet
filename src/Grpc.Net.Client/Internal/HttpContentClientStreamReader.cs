@@ -27,7 +27,7 @@ namespace Grpc.Net.Client.Internal;
 
 [DebuggerDisplay("{DebuggerToString(),nq}")]
 [DebuggerTypeProxy(typeof(HttpContentClientStreamReader<,>.HttpContentClientStreamReaderDebugView))]
-internal class HttpContentClientStreamReader<TRequest, TResponse> : IAsyncStreamReader<TResponse>
+internal sealed class HttpContentClientStreamReader<TRequest, TResponse> : IAsyncStreamReader<TResponse>
     where TRequest : class
     where TResponse : class
 {
@@ -97,6 +97,7 @@ internal class HttpContentClientStreamReader<TRequest, TResponse> : IAsyncStream
             }
         }
 
+        Task<bool> moveNextTask;
         lock (_moveNextLock)
         {
             using (_call.StartScope())
@@ -109,12 +110,13 @@ internal class HttpContentClientStreamReader<TRequest, TResponse> : IAsyncStream
                     return Task.FromException<bool>(ex);
                 }
 
+                moveNextTask = MoveNextCore(cancellationToken);
                 // Save move next task to track whether it is complete
-                _moveNextTask = MoveNextCore(cancellationToken);
+                _moveNextTask = moveNextTask;
             }
         }
 
-        return _moveNextTask;
+        return moveNextTask;
     }
 
     private async Task<bool> MoveNextCore(CancellationToken cancellationToken)
@@ -142,7 +144,11 @@ internal class HttpContentClientStreamReader<TRequest, TResponse> : IAsyncStream
 #if NET5_0_OR_GREATER
                     _responseStream = await _httpResponse.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
 #else
-                    _responseStream = await _httpResponse.Content.ReadAsStreamAsync().ConfigureAwait(false);
+                    // On .NET Framework, HttpResponseMessage.Content can be null when no content
+                    // body was set (e.g. a Trailers-Only response). Use Stream.Null in that case.
+                    _responseStream = _httpResponse.Content != null
+                        ? await _httpResponse.Content.ReadAsStreamAsync().ConfigureAwait(false)
+                        : Stream.Null;
 #endif
                 }
                 catch (ObjectDisposedException)
@@ -275,13 +281,8 @@ internal class HttpContentClientStreamReader<TRequest, TResponse> : IAsyncStream
     }
 }
 
-internal static class HttpContentClientStreamReaderLog
+internal static partial class HttpContentClientStreamReaderLog
 {
-    private static readonly Action<ILogger, Exception> _readMessageError =
-        LoggerMessage.Define(LogLevel.Error, new EventId(1, "ReadMessageError"), "Error reading message.");
-
-    public static void ReadMessageError(ILogger logger, Exception ex)
-    {
-        _readMessageError(logger, ex);
-    }
+    [LoggerMessage(Level = LogLevel.Error, EventId = 1, EventName = "ReadMessageError", Message = "Error reading message.")]
+    public static partial void ReadMessageError(ILogger logger, Exception ex);
 }

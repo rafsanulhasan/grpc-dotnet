@@ -150,27 +150,6 @@ public class CallHandlerTests
         Assert.AreEqual("Request protocol of 'HTTP/1.1' is not supported.", log!.Message);
     }
 
-#if !NET5_0_OR_GREATER
-    // .NET Core 3.0 + IIS returned HTTP/2.0 as the protocol
-    [Test]
-    public async Task ProtocolValidation_IISHttp2Protocol_Success()
-    {
-        // Arrange
-        var testSink = new TestSink();
-        var testLoggerFactory = new TestLoggerFactory(testSink, true);
-
-        var httpContext = HttpContextHelpers.CreateContext(protocol: GrpcProtocolConstants.Http20Protocol);
-        var call = CreateHandler(MethodType.ClientStreaming, testLoggerFactory);
-
-        // Act
-        await call.HandleCallAsync(httpContext).DefaultTimeout();
-
-        // Assert
-        var log = testSink.Writes.SingleOrDefault(w => w.EventId.Name == "UnsupportedRequestProtocol");
-        Assert.IsNull(log);
-    }
-#endif
-
 #if NET8_0_OR_GREATER
     [TestCase(MethodType.Unary, false)]
     [TestCase(MethodType.ClientStreaming, true)]
@@ -270,6 +249,7 @@ public class CallHandlerTests
         Func<Task>? handlerAction = null)
     {
         var method = new Method<TestMessage, TestMessage>(methodType, "test", "test", _marshaller, _marshaller);
+        var interceptorActivators = new InterceptorActivators(new ServiceCollection().BuildServiceProvider());
 
         switch (methodType)
         {
@@ -283,7 +263,8 @@ public class CallHandlerTests
                         },
                         method,
                         HttpContextServerCallContextHelper.CreateMethodOptions(),
-                        new TestGrpcServiceActivator<TestService>()),
+                        new TestGrpcServiceActivator<TestService>(),
+                        interceptorActivators),
                     loggerFactory ?? NullLoggerFactory.Instance);
             case MethodType.ClientStreaming:
                 return new ClientStreamingServerCallHandler<TestService, TestMessage, TestMessage>(
@@ -295,7 +276,8 @@ public class CallHandlerTests
                         },
                         method,
                         HttpContextServerCallContextHelper.CreateMethodOptions(),
-                        new TestGrpcServiceActivator<TestService>()),
+                        new TestGrpcServiceActivator<TestService>(),
+                        interceptorActivators),
                     loggerFactory ?? NullLoggerFactory.Instance);
             case MethodType.ServerStreaming:
                 return new ServerStreamingServerCallHandler<TestService, TestMessage, TestMessage>(
@@ -306,7 +288,8 @@ public class CallHandlerTests
                         },
                         method,
                         HttpContextServerCallContextHelper.CreateMethodOptions(),
-                        new TestGrpcServiceActivator<TestService>()),
+                        new TestGrpcServiceActivator<TestService>(),
+                        interceptorActivators),
                     loggerFactory ?? NullLoggerFactory.Instance);
             case MethodType.DuplexStreaming:
                 return new DuplexStreamingServerCallHandler<TestService, TestMessage, TestMessage>(
@@ -317,7 +300,8 @@ public class CallHandlerTests
                         },
                         method,
                         HttpContextServerCallContextHelper.CreateMethodOptions(),
-                        new TestGrpcServiceActivator<TestService>()),
+                        new TestGrpcServiceActivator<TestService>(),
+                        interceptorActivators),
                     loggerFactory ?? NullLoggerFactory.Instance);
             default:
                 throw new ArgumentException("Unexpected method type: " + methodType);

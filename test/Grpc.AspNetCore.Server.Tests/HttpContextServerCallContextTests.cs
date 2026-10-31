@@ -1,4 +1,4 @@
-﻿#region Copyright notice and license
+#region Copyright notice and license
 
 // Copyright 2019 The gRPC Authors
 //
@@ -537,7 +537,7 @@ public class HttpContextServerCallContextTests
     {
         // Arrange
         var httpContext = new DefaultHttpContext();
-        var certificate = new X509Certificate2(TestHelpers.ResolvePath(@"Certs/client.crt"));
+        var certificate = GrpcProtocolHelpersTests.LoadCertificate(TestHelpers.ResolvePath(@"Certs/client.crt"));
         httpContext.Connection.ClientCertificate = certificate;
         var serverCallContext = CreateServerCallContext(httpContext);
 
@@ -603,9 +603,7 @@ public class HttpContextServerCallContextTests
     }
 
     [TestCase("HTTP/2", GrpcProtocolConstants.Http2ResetStreamCancel)]
-#if NET6_0_OR_GREATER
     [TestCase("HTTP/3", GrpcProtocolConstants.Http3ResetStreamCancel)]
-#endif
     public Task EndCallAsync_LongRunningDeadlineAbort_WaitsUntilDeadlineAbortIsFinished(
         string protocol,
         int expectedResetCode)
@@ -618,9 +616,7 @@ public class HttpContextServerCallContextTests
     }
 
     [TestCase("HTTP/2", GrpcProtocolConstants.Http2ResetStreamCancel)]
-#if NET6_0_OR_GREATER
     [TestCase("HTTP/3", GrpcProtocolConstants.Http3ResetStreamCancel)]
-#endif
     public Task ProcessHandlerErrorAsync_LongRunningDeadlineAbort_WaitsUntilDeadlineAbortIsFinished(
         string protocol,
         int expectedResetCode)

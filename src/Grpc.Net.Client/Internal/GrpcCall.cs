@@ -61,14 +61,16 @@ internal sealed partial class GrpcCall<TRequest, TResponse> : GrpcCall, IGrpcCal
     public HttpContentClientStreamWriter<TRequest, TResponse>? ClientStreamWriter { get; private set; }
     public HttpContentClientStreamReader<TRequest, TResponse>? ClientStreamReader { get; private set; }
 
-    public GrpcCall(Method<TRequest, TResponse> method, GrpcMethodInfo grpcMethodInfo, CallOptions options, GrpcChannel channel, int attemptCount)
+    public GrpcCall(Method<TRequest, TResponse> method, GrpcMethodInfo grpcMethodInfo, CallOptions options, GrpcChannel channel, int attemptCount, bool forceAsyncHttpResponse)
         : base(options, channel)
     {
         // Validate deadline before creating any objects that require cleanup
         ValidateDeadline(options.Deadline);
 
         _callCts = new CancellationTokenSource();
-        _httpResponseTcs = new TaskCompletionSource<HttpResponseMessage>(TaskCreationOptions.RunContinuationsAsynchronously);
+        // Retries and hedging can run multiple calls at the same time and use locking for thread-safety.
+        // Running HTTP response continuation asynchronously is required for locking to work correctly.
+        _httpResponseTcs = new TaskCompletionSource<HttpResponseMessage>(forceAsyncHttpResponse ? TaskCreationOptions.RunContinuationsAsynchronously : TaskCreationOptions.None);
         // Run the callTcs continuation immediately to keep the same context. Required for Activity.
         _callTcs = new TaskCompletionSource<Status>();
         Method = method;
@@ -142,7 +144,10 @@ internal sealed partial class GrpcCall<TRequest, TResponse> : GrpcCall, IGrpcCal
 
     internal void StartUnaryCore(HttpContent content)
     {
-        _responseTcs = new TaskCompletionSource<TResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+        // Not created with RunContinuationsAsynchronously to avoid unnecessary dispatch to the thread pool.
+        // The TCS is set from RunCall but it is the last operation before the method exits so there shouldn't
+        // be an impact from running the response continutation synchronously.
+        _responseTcs = new TaskCompletionSource<TResponse>();
 
         var timeout = GetTimeout();
         var message = CreateHttpRequestMessage(timeout);
@@ -161,7 +166,10 @@ internal sealed partial class GrpcCall<TRequest, TResponse> : GrpcCall, IGrpcCal
 
     internal void StartClientStreamingCore(HttpContentClientStreamWriter<TRequest, TResponse> clientStreamWriter, HttpContent content)
     {
-        _responseTcs = new TaskCompletionSource<TResponse>(TaskCreationOptions.RunContinuationsAsynchronously);
+        // Not created with RunContinuationsAsynchronously to avoid unnecessary dispatch to the thread pool.
+        // The TCS is set from RunCall but it is the last operation before the method exits so there shouldn't
+        // be an impact from running the response continutation synchronously.
+        _responseTcs = new TaskCompletionSource<TResponse>();
 
         var timeout = GetTimeout();
         var message = CreateHttpRequestMessage(timeout);
@@ -299,15 +307,6 @@ internal sealed partial class GrpcCall<TRequest, TResponse> : GrpcCall, IGrpcCal
         {
             var httpResponse = await HttpResponseTask.ConfigureAwait(false);
 
-            // Check if the headers have a status. If they do then wait for the overall call task
-            // to complete before returning headers. This means that if the call failed with a
-            // a status then it is possible to await response headers and then call GetStatus().
-            var grpcStatus = GrpcProtocolHelpers.GetHeaderValue(httpResponse.Headers, GrpcProtocolConstants.StatusTrailer);
-            if (grpcStatus != null)
-            {
-                await CallTask.ConfigureAwait(false);
-            }
-
             var metadata = GrpcProtocolHelpers.BuildMetadata(httpResponse.Headers);
 
             // https://github.com/grpc/proposal/blob/master/A6-client-retries.md#exposed-retry-metadata
@@ -431,9 +430,6 @@ internal sealed partial class GrpcCall<TRequest, TResponse> : GrpcCall, IGrpcCal
             // Cancellation will also cause reader/writer to throw if used afterwards.
             _callCts.Cancel();
 
-            // Ensure any logic that is waiting on the HttpResponse is unstuck.
-            _httpResponseTcs.TrySetCanceled();
-
             // Cancellation token won't send RST_STREAM if HttpClient.SendAsync is complete.
             // Dispose HttpResponseMessage to send RST_STREAM to server for in-progress calls.
             HttpResponse?.Dispose();
@@ -545,6 +541,16 @@ internal sealed partial class GrpcCall<TRequest, TResponse> : GrpcCall, IGrpcCal
                     }
                     else
                     {
+                        if (ClientStreamReader != null && status.Value.StatusCode == StatusCode.OK)
+                        {
+                            // This is a Trailers-Only response with OK status for a streaming call.
+                            // Hand the response to the stream reader so it can process the (empty)
+                            // stream and resolve the final call status. TCS will also be set in Dispose.
+                            ClientStreamReader.HttpResponseTcs.TrySetResult((HttpResponse, status));
+
+                            status = await CallTask.ConfigureAwait(false);
+                        }
+
                         finished = FinishCall(request, diagnosticSourceEnabled, activity, status.Value);
                         FinishResponseAndCleanUp(status.Value);
                     }
@@ -652,6 +658,9 @@ internal sealed partial class GrpcCall<TRequest, TResponse> : GrpcCall, IGrpcCal
             // Verify that FinishCall is called in every code path of this method.
             // Should create an "Unassigned variable" compiler error if not set.
             Debug.Assert(finished);
+            // Should be completed before exiting.
+            Debug.Assert(_httpResponseTcs.Task.IsCompleted);
+            Debug.Assert(_responseTcs == null || _responseTcs.Task.IsCompleted);
         }
     }
 
@@ -949,9 +958,9 @@ internal sealed partial class GrpcCall<TRequest, TResponse> : GrpcCall, IGrpcCal
     private HttpRequestMessage CreateHttpRequestMessage(TimeSpan? timeout)
     {
         var message = new HttpRequestMessage(HttpMethod.Post, _grpcMethodInfo.CallUri);
-        message.Version = GrpcProtocolConstants.Http2Version;
+        message.Version = Channel.HttpVersion;
 #if NET5_0_OR_GREATER
-        message.VersionPolicy = HttpVersionPolicy.RequestVersionOrHigher;
+        message.VersionPolicy = Channel.HttpVersionPolicy;
 #endif
 
         // Set raw headers on request using name/values. Typed headers allocate additional objects.

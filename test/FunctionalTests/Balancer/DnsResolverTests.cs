@@ -142,23 +142,23 @@ public class DnsResolverTests : FunctionalTestBase
         AssertHasLog(LogLevel.Trace, "StartingResolveBackoff", "DnsResolver starting resolve backoff of 00:00:00.5000000.");
     }
 
-    private DnsResolver CreateDnsResolver(Uri address, int? defaultPort = null, TimeSpan? refreshInterval = null)
+    private DnsResolver CreateDnsResolver(Uri address, int? defaultPort = null, TimeSpan? refreshInterval = null, TimeSpan? backoffDuration = null)
     {
         return new DnsResolver(address, defaultPort ?? 80, LoggerFactory, refreshInterval ?? Timeout.InfiniteTimeSpan, new TestBackoffPolicyFactory());
     }
 
-    internal class TestBackoffPolicyFactory : IBackoffPolicyFactory
+    internal class TestBackoffPolicyFactory(TimeSpan? backoffDuration = null) : IBackoffPolicyFactory
     {
         public IBackoffPolicy Create()
         {
-            return new TestBackoffPolicy();
+            return new TestBackoffPolicy(backoffDuration ?? TimeSpan.FromSeconds(0.5));
         }
 
-        private class TestBackoffPolicy : IBackoffPolicy
+        private class TestBackoffPolicy(TimeSpan backoffDuration) : IBackoffPolicy
         {
             public TimeSpan NextBackoff()
             {
-                return TimeSpan.FromSeconds(0.5);
+                return backoffDuration;
             }
         }
     }
@@ -272,10 +272,11 @@ public class DnsResolverTests : FunctionalTestBase
 
         // Arrange
         var tcs = new TaskCompletionSource<ResolverResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var dnsResolver = CreateDnsResolver(new Uri("dns:///localhost"));
+        var dnsResolver = CreateDnsResolver(new Uri("dns:///localhost"), backoffDuration: TimeSpan.FromSeconds(5));
         dnsResolver.Start(r =>
         {
-            tcs.SetResult(r);
+            Logger.LogInformation("Setting resolver results to TCS {TcsId}", System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(tcs));
+            tcs.TrySetResult(r);
         });
 
         // Act
@@ -286,13 +287,22 @@ public class DnsResolverTests : FunctionalTestBase
         Assert.Greater(result.Addresses!.Count, 0);
 
         // Wait for the internal resolve task to be completed before triggering refresh again
+        Logger.LogInformation("Wait for DNS resolver resolve task to complete.");
         await dnsResolver._resolveTask.DefaultTimeout();
+
+        Logger.LogInformation("Recreate TCS and refresh resolver again.");
+
         tcs = new TaskCompletionSource<ResolverResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        Logger.LogInformation("New TCS: {TcsId}", System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(tcs));
+
         dnsResolver.Refresh();
 
+        Logger.LogInformation("Dispose resolver while refresh is in progress. The refresh should be waiting for the min interval to complete.");
         dnsResolver.Dispose();
 
         result = await tcs.Task.DefaultTimeout();
+
+        Logger.LogInformation("Received result from disposing resolver.");
         Assert.AreEqual(StatusCode.Unavailable, result.Status.StatusCode);
         Assert.AreEqual("Error getting DNS hosts for address 'localhost'. TaskCanceledException: A task was canceled.", result.Status.Detail);
         Assert.AreEqual("A task was canceled.", result.Status.DebugException!.Message);

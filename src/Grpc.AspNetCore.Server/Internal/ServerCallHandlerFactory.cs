@@ -1,4 +1,4 @@
-﻿#region Copyright notice and license
+#region Copyright notice and license
 
 // Copyright 2019 The gRPC Authors
 //
@@ -31,14 +31,11 @@ namespace Grpc.AspNetCore.Server.Internal;
 /// <summary>
 /// Creates server call handlers. Provides a place to get services that call handlers will use.
 /// </summary>
-internal partial class ServerCallHandlerFactory<
-#if NET5_0_OR_GREATER
-    [DynamicallyAccessedMembers(GrpcProtocolConstants.ServiceAccessibility)]
-#endif
-    TService> where TService : class
+internal sealed partial class ServerCallHandlerFactory<[DynamicallyAccessedMembers(GrpcProtocolConstants.ServiceAccessibility)] TService> where TService : class
 {
     private readonly ILoggerFactory _loggerFactory;
     private readonly IGrpcServiceActivator<TService> _serviceActivator;
+    private readonly InterceptorActivators _interceptorActivators;
     private readonly GrpcServiceOptions _globalOptions;
     private readonly GrpcServiceOptions<TService> _serviceOptions;
 
@@ -46,10 +43,12 @@ internal partial class ServerCallHandlerFactory<
         ILoggerFactory loggerFactory,
         IOptions<GrpcServiceOptions> globalOptions,
         IOptions<GrpcServiceOptions<TService>> serviceOptions,
-        IGrpcServiceActivator<TService> serviceActivator)
+        IGrpcServiceActivator<TService> serviceActivator,
+        InterceptorActivators interceptorActivators)
     {
         _loggerFactory = loggerFactory;
         _serviceActivator = serviceActivator;
+        _interceptorActivators = interceptorActivators;
         _serviceOptions = serviceOptions.Value;
         _globalOptions = globalOptions.Value;
     }
@@ -65,7 +64,7 @@ internal partial class ServerCallHandlerFactory<
         where TResponse : class
     {
         var options = CreateMethodOptions();
-        var methodInvoker = new UnaryServerMethodInvoker<TService, TRequest, TResponse>(invoker, method, options, _serviceActivator);
+        var methodInvoker = new UnaryServerMethodInvoker<TService, TRequest, TResponse>(invoker, method, options, _serviceActivator, _interceptorActivators);
 
         return new UnaryServerCallHandler<TService, TRequest, TResponse>(methodInvoker, _loggerFactory);
     }
@@ -75,7 +74,7 @@ internal partial class ServerCallHandlerFactory<
         where TResponse : class
     {
         var options = CreateMethodOptions();
-        var methodInvoker = new ClientStreamingServerMethodInvoker<TService, TRequest, TResponse>(invoker, method, options, _serviceActivator);
+        var methodInvoker = new ClientStreamingServerMethodInvoker<TService, TRequest, TResponse>(invoker, method, options, _serviceActivator, _interceptorActivators);
 
         return new ClientStreamingServerCallHandler<TService, TRequest, TResponse>(methodInvoker, _loggerFactory);
     }
@@ -85,7 +84,7 @@ internal partial class ServerCallHandlerFactory<
         where TResponse : class
     {
         var options = CreateMethodOptions();
-        var methodInvoker = new DuplexStreamingServerMethodInvoker<TService, TRequest, TResponse>(invoker, method, options, _serviceActivator);
+        var methodInvoker = new DuplexStreamingServerMethodInvoker<TService, TRequest, TResponse>(invoker, method, options, _serviceActivator, _interceptorActivators);
 
         return new DuplexStreamingServerCallHandler<TService, TRequest, TResponse>(methodInvoker, _loggerFactory);
     }
@@ -95,7 +94,7 @@ internal partial class ServerCallHandlerFactory<
         where TResponse : class
     {
         var options = CreateMethodOptions();
-        var methodInvoker = new ServerStreamingServerMethodInvoker<TService, TRequest, TResponse>(invoker, method, options, _serviceActivator);
+        var methodInvoker = new ServerStreamingServerMethodInvoker<TService, TRequest, TResponse>(invoker, method, options, _serviceActivator, _interceptorActivators);
 
         return new ServerStreamingServerCallHandler<TService, TRequest, TResponse>(methodInvoker, _loggerFactory);
     }
@@ -158,21 +157,11 @@ internal partial class ServerCallHandlerFactory<
     }
 }
 
-internal static class ServerCallHandlerFactoryLog
+internal static partial class ServerCallHandlerFactoryLog
 {
-    private static readonly Action<ILogger, string, Exception?> _serviceUnimplemented =
-        LoggerMessage.Define<string>(LogLevel.Information, new EventId(1, "ServiceUnimplemented"), "Service '{ServiceName}' is unimplemented.");
+    [LoggerMessage(Level = LogLevel.Information, EventId = 1, EventName = "ServiceUnimplemented", Message = "Service '{ServiceName}' is unimplemented.")]
+    public static partial void ServiceUnimplemented(ILogger logger, string serviceName);
 
-    private static readonly Action<ILogger, string, Exception?> _methodUnimplemented =
-        LoggerMessage.Define<string>(LogLevel.Information, new EventId(2, "MethodUnimplemented"), "Method '{MethodName}' is unimplemented.");
-
-    public static void ServiceUnimplemented(ILogger logger, string serviceName)
-    {
-        _serviceUnimplemented(logger, serviceName, null);
-    }
-
-    public static void MethodUnimplemented(ILogger logger, string methodName)
-    {
-        _methodUnimplemented(logger, methodName, null);
-    }
+    [LoggerMessage(Level = LogLevel.Information, EventId = 2, EventName = "MethodUnimplemented", Message = "Method '{MethodName}' is unimplemented.")]
+    public static partial void MethodUnimplemented(ILogger logger, string methodName);
 }

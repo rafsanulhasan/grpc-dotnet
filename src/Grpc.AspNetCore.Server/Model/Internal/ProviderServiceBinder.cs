@@ -24,11 +24,7 @@ using Microsoft.AspNetCore.Routing;
 
 namespace Grpc.AspNetCore.Server.Model.Internal;
 
-internal class ProviderServiceBinder<
-#if NET5_0_OR_GREATER
-    [DynamicallyAccessedMembers(GrpcProtocolConstants.ServiceAccessibility)]
-#endif
-    TService> : ServiceBinderBase where TService : class
+internal sealed class ProviderServiceBinder<[DynamicallyAccessedMembers(GrpcProtocolConstants.ServiceAccessibility)] TService> : ServiceBinderBase where TService : class
 {
     private readonly ServiceMethodProviderContext<TService> _context;
     private readonly Type _declaringType;
@@ -95,7 +91,7 @@ internal class ProviderServiceBinder<
         // Accepting CORS preflight means gRPC will allow requests with OPTIONS + preflight headers.
         // If CORS middleware hasn't been configured then the request will reach gRPC handler.
         // gRPC will return 405 response and log that CORS has not been configured.
-        metadata.Add(new HttpMethodMetadata(new[] { "POST" }, acceptCorsPreflight: true));
+        metadata.Add(new HttpMethodMetadata(["POST"], acceptCorsPreflight: true));
 
         return (invoker, metadata);
     }
